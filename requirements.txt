@@ -1,0 +1,6 @@
+beautifulsoup4==4.14.3
+openai==2.15.0
+python-dotenv==1.2.1
+python-telegram-bot==22.5
+replicate==1.0.7
+requests==2.32.5

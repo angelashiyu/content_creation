@@ -8,10 +8,21 @@ load_dotenv()
 BASE_URL = os.environ["MASTODON_BASE_URL"].rstrip("/")
 TOKEN = os.environ["MASTODON_ACCESS_TOKEN"]
 
-def post_status(text: str, visibility: str = "public", in_reply_to_id: str | None = None) -> dict:
+def post_status(
+    text: str,
+    visibility: str | None = None,
+    in_reply_to_id: str | None = None,
+    media_ids: list[str] | None = None,
+) -> dict:
     url = f"{BASE_URL}/api/v1/statuses"
     headers = {"Authorization": f"Bearer {TOKEN}"}
-    data = {"status": text, "visibility": visibility}  # public|unlisted|private|direct
+    data = {"status": text}
+    if visibility:
+        data["visibility"] = visibility  # public|unlisted|private|direct; omitted = account default
+    if in_reply_to_id:
+        data["in_reply_to_id"] = in_reply_to_id
+    if media_ids:
+        data["media_ids[]"] = media_ids
 
     r = requests.post(url, headers=headers, data=data, timeout=30)
 
@@ -19,10 +30,30 @@ def post_status(text: str, visibility: str = "public", in_reply_to_id: str | Non
     if r.status_code == 429:
         retry_after = int(r.headers.get("Retry-After", "5"))
         time.sleep(retry_after)
-        return post_status(text, visibility=visibility)
+        return post_status(text, visibility=visibility, in_reply_to_id=in_reply_to_id, media_ids=media_ids)
 
     r.raise_for_status()
     return r.json()
+
+def upload_media_from_url(image_url: str, alt_text: str = "") -> str:
+    img_bytes = requests.get(image_url, timeout=60).content
+
+    # Upload to Mastodon (v2 recommended; v1 works but is deprecated)
+    files = {"file": ("image.png", img_bytes)}
+    data = {}
+    if alt_text:
+        data["description"] = alt_text  # supported on v1; many instances also accept on v2
+
+    r = requests.post(
+        f"{BASE_URL}/api/v2/media",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+        files=files,
+        data=data,
+        timeout=60,
+    )
+    r.raise_for_status()
+    media = r.json()
+    return media["id"]
 
 def post_batch(posts: list[dict], visibility: str = "unlisted", dry_run: bool = True):
     """

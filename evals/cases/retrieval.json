@@ -1,0 +1,9 @@
+[
+  {"query": "who are the target customers", "expect": ["Agencies offering AI/SEO strategy"]},
+  {"query": "how do you measure brand presence in AI answers", "expect": ["share of answer"]},
+  {"query": "why is traditional SEO not enough", "expect": ["different distribution channel"]},
+  {"query": "what actions or recommendations do you generate", "expect": ["content briefs"]},
+  {"query": "what outcomes can brands expect", "expect": ["citation quality"]},
+  {"query": "what makes this different from keyword SEO tools", "expect": ["repeatable playbooks"]},
+  {"query": "brand tagline", "expect": ["Be the answer"]}
+]

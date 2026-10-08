@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -26,7 +27,7 @@ def fetch_recent_statuses_for_keyword(keyword: str, limit: int = 5) -> list[dict
     Try full-text search first (/api/v2/search). If empty, fall back to hashtag timeline.
     """
     # 1) Try /api/v2/search (statuses)
-    # Docs: /api/v2/search supports type=statuses and limit. :contentReference[oaicite:7]{index=7}
+    # Docs: /api/v2/search supports type=statuses and limit.
     try:
         data = mastodon_get("/api/v2/search", params={"q": keyword, "type": "statuses", "limit": limit})
         statuses = data.get("statuses", []) if isinstance(data, dict) else []
@@ -37,8 +38,9 @@ def fetch_recent_statuses_for_keyword(keyword: str, limit: int = 5) -> list[dict
         return statuses[:limit]
 
     # 2) Fallback: hashtag timeline (more reliable than keyword search)
-    # Docs: /api/v1/timelines/tag/:hashtag :contentReference[oaicite:8]{index=8}
-    hashtag_candidates = ["AISEO", "AI_SEO,"]
+    # Docs: /api/v1/timelines/tag/:hashtag
+    words = re.findall(r"\w+", keyword)
+    hashtag_candidates = dict.fromkeys(["".join(words), "_".join(words)])  # "AI SEO" -> AISEO, AI_SEO
     for tag in hashtag_candidates:
         try:
             statuses = mastodon_get(f"/api/v1/timelines/tag/{tag}", params={"limit": limit})

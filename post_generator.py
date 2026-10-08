@@ -1,22 +1,10 @@
-import os
-from dotenv import load_dotenv
-from pathlib import Path
-from openai import OpenAI
+from llm import BRAND_VOICE, complete
 
-load_dotenv(dotenv_path=Path(__file__).with_name(".env"))
-
-client = OpenAI(
-    api_key=os.environ["OPENROUTER_API_KEY"],
-    base_url="https://openrouter.ai/api/v1",
-)
-
-DEFAULT_MODEL = os.environ.get("OPENROUTER_MODEL", "nvidia/nemotron-3-nano-30b-a3b:free")
-
-def generate_post(context: str, topic: str = "AI SEO", max_words: int = 80) -> str:
+def generate_post(context: str, topic: str = "AI SEO", max_words: int = 80, model: str | None = None) -> str:
     system = (
         "You write social posts for a GenAI marketing intelligence platform.\n"
-        "Voice: analytical, practical, direct, slightly opinionated, optimistic.\n"
-        "Rules: no hype, no guarantees, no 'DM me'. Keep it tight.\n"
+        f"Voice: {BRAND_VOICE}\n"
+        "Rules: no 'DM me'. Keep it tight.\n"
     )
 
     user = f"""
@@ -32,11 +20,10 @@ Write ONE Mastodon post about: {topic}
 Return ONLY the post text.
 """.strip()
 
-    resp = client.responses.create(
-        model=DEFAULT_MODEL,
-        input=[
+    return complete(
+        [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
+        model=model,
     )
-    return resp.output_text.strip()

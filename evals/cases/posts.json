@@ -1,0 +1,9 @@
+[
+  {"id": "pipeline_default", "topic": "AI SEO", "max_words": 80},
+  {"id": "measurement", "topic": "measuring brand mentions in LLM answers", "max_words": 80},
+  {"id": "missing_brands", "topic": "why brands go missing from AI answers", "max_words": 80},
+  {"id": "citations", "topic": "citations in AI answers vs. classic backlinks", "max_words": 80},
+  {"id": "agencies", "topic": "AI answer visibility for agencies", "max_words": 80},
+  {"id": "short", "topic": "AI SEO", "max_words": 40},
+  {"id": "not_in_context", "topic": "our pricing and customer results", "max_words": 80}
+]

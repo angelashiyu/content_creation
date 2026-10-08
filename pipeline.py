@@ -1,22 +1,15 @@
 import os
 import asyncio
 from approval_bot import ApprovalBot
-from mastodon_publisher import publish_to_mastodon
+from mastodon_post import post_status
 from notion_fetch import get_context_text
 from post_generator import generate_post as llm_generate_post
-from chunking import chunk_document
-from retrieval import retrieve_top_k
+from retrieval import build_context
 
 
 async def generate_post() -> str:
-    context = get_context_text()
-    chunks = chunk_document(context, mode="paragraph", target_chars=500)
-
     # Step 4: RAG retrieval
-    query = "GenAI marketing intelligence platform AI answer visibility AI SEO"
-    top_chunks = retrieve_top_k(query, chunks, k=6)
-
-    context_for_llm = "\n\n---\n\n".join(top_chunks)
+    context_for_llm = build_context(get_context_text())
 
     post = llm_generate_post(context_for_llm, topic="AI SEO", max_words=80)
     return post
@@ -36,7 +29,7 @@ async def main():
             if dry:
                 print("🧪 DRY_RUN: would publish this:\n", post)
             else:
-                await publish_to_mastodon(post)
+                post_status(post)
                 print("✅ Published to Mastodon.")
         elif decision == "reject":
             print(f"❌ Rejected. Reason: {reason}")
@@ -45,4 +38,5 @@ async def main():
     finally:
         await approval.stop()
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

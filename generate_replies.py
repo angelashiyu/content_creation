@@ -1,19 +1,11 @@
-import os, json
-from dotenv import load_dotenv
-from openai import OpenAI
+import json
+from llm import BRAND_VOICE, complete
 
-load_dotenv()
-
-client = OpenAI(
-    api_key=os.environ["OPENROUTER_API_KEY"],
-    base_url="https://openrouter.ai/api/v1",
-)
-
-BRAND_DOCS = """\
+BRAND_DOCS = f"""\
 You are the brand voice for a GenAI marketing intelligence platform.
 We help brands gain visibility inside AI-generated answers by measuring how LLMs mention them, diagnosing why they’re missing, and generating prioritized actions to improve their presence.
 
-Voice: Analytical, practical, direct, slightly opinionated, optimistic. No hype. No guarantees.
+Voice: {BRAND_VOICE}
 Reply rules:
 - Add value (answer, clarify, or share a helpful frame).
 - Do NOT be salesy.
@@ -33,7 +25,7 @@ SCHEMA_SHAPE = {
   ]
 }
 
-def generate_replies(statuses, model="nvidia/nemotron-3-nano-30b-a3b:free"):
+def generate_replies(statuses, model: str | None = None):
     prompt = f"""
 {BRAND_DOCS}
 
@@ -44,8 +36,7 @@ Statuses to reply to (your in_reply_to_id must match each status id):
 {json.dumps(statuses, ensure_ascii=False)}
 """
 
-    resp = client.responses.create(model=model, input=prompt)
-    raw = resp.output_text.strip()
+    raw = complete(prompt, model=model)
     return json.loads(raw)
 
 if __name__ == "__main__":
