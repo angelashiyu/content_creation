@@ -64,9 +64,9 @@ def passed(rec: dict) -> bool:
 
 
 def run_posts(document: str, n: int, model: str | None, judge_model: str | None) -> list[dict]:
-    context = build_context(document)
     records = []
     for case in load_cases("posts"):
+        context = build_context(document, query=case["topic"])  # same call as pipeline.generate_post
         for i in range(n):
             rec = {"case": case["id"], "sample": i}
             records.append(rec)

@@ -54,7 +54,8 @@ def fetch_page_text(page_id: str) -> str:
         txt = _block_text(b)
         if txt:
             lines.append(txt)
-    return "\n".join(lines).strip()
+    # blank line between blocks so chunk_by_paragraphs can find the boundaries
+    return "\n\n".join(lines).strip()
 
 def get_context_text(config_path: str = "config.json") -> str:
     with open(config_path, "r", encoding="utf-8") as f:

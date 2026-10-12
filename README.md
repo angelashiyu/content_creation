@@ -7,7 +7,7 @@ Text generation goes through [OpenRouter](https://openrouter.ai). Images come fr
 ## How the post pipeline works
 
 1. `notion_fetch.py` reads the Notion page named in `config.json`.
-2. `retrieval.py` chunks the text and keeps the chunks that best match a fixed query, scored by keyword overlap.
+2. `retrieval.py` chunks the text and keeps the 3 chunks that best match the post topic, scored by keyword overlap.
 3. `post_generator.py` asks the LLM for one post about "AI SEO", 80 words at most, in the brand voice defined in `llm.py`.
 4. `approval_bot.py` sends the draft to a Telegram chat with Approve and Reject buttons and waits up to 30 minutes.
 5. On approve, `mastodon_post.py` publishes the post. On reject, the bot asks for a reason and the pipeline prints it.
@@ -132,7 +132,5 @@ Things to know when reading the numbers:
 
 ## Known limitations
 
-- **Retrieval does not filter anything yet.** Notion blocks are joined with single newlines and the paragraph chunker splits on blank lines, so the whole page becomes one chunk and is always passed to the LLM in full.
-- **Posts can invent facts.** On a topic the Notion page does not cover, the model makes up details. The `not_in_context` eval case catches this.
-- **Replies are never flagged for review.** Spam and prompt-injection statuses come back with `requires_review` set to false. The `review_flagged` eval check catches this.
+- **Posts may still invent facts.** On a topic the Notion page does not cover, the model used to make up details. The post prompt now forbids this, but the `not_in_context` eval case has not been rerun since the change.
 - **Rejection reasons are not used.** The reason is printed, but no new draft is generated from it.

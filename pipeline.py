@@ -7,11 +7,11 @@ from post_generator import generate_post as llm_generate_post
 from retrieval import build_context
 
 
-async def generate_post() -> str:
+def generate_post(topic: str = "AI SEO") -> str:
     # Step 4: RAG retrieval
-    context_for_llm = build_context(get_context_text())
+    context_for_llm = build_context(get_context_text(), query=topic)
 
-    post = llm_generate_post(context_for_llm, topic="AI SEO", max_words=80)
+    post = llm_generate_post(context_for_llm, topic=topic, max_words=80)
     return post
 
 async def main():
@@ -19,22 +19,22 @@ async def main():
     await approval.start()
 
     try:
-        post = await generate_post()
+        post = generate_post()
         decision, reason = await approval.request_approval(post, timeout_s=1800)
 
-        # ✅ add DRY_RUN logic here (right after decision)
+        # DRY_RUN=true prints instead of publishing
         dry = os.environ.get("DRY_RUN", "false").lower() == "true"
 
         if decision == "approve":
             if dry:
-                print("🧪 DRY_RUN: would publish this:\n", post)
+                print(" DRY_RUN: would publish this:\n", post)
             else:
                 post_status(post)
-                print("✅ Published to Mastodon.")
+                print("Accepted.Published to Mastodon.")
         elif decision == "reject":
-            print(f"❌ Rejected. Reason: {reason}")
+            print(f"Rejected. Reason: {reason}")
         else:
-            print("⏳ Timed out waiting for approval.")
+            print("Timed out waiting for approval.")
     finally:
         await approval.stop()
 

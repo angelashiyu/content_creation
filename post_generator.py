@@ -17,6 +17,8 @@ Write ONE Mastodon post about: {topic}
 - 1 short hook line
 - 2-4 concise bullet points OR 2 short paragraphs
 - Optional: 1 relevant hashtag (max 2)
+- Use only facts stated in the company context. Never invent prices, plans, customers, numbers or results.
+- If the context lacks the facts the topic needs, stay on the topic but say only what the context supports. Do not fill the gap with specifics.
 Return ONLY the post text.
 """.strip()
 
