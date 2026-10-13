@@ -23,7 +23,8 @@ def check_post(text: str, max_words: int) -> dict[str, bool]:
     quoted = len(stripped) > 1 and stripped[0] in "\"“" and stripped[-1] in "\"”"
     return {
         "non_empty": bool(stripped),
-        "word_limit": len(stripped.split()) <= max_words,
+        # bullet dashes and other bare punctuation are not words
+        "word_limit": sum(any(c.isalnum() for c in tok) for tok in stripped.split()) <= max_words,
         "char_limit": len(stripped) <= MASTODON_CHAR_LIMIT,
         "max_2_hashtags": len(_HASHTAG.findall(stripped)) <= 2,
         "no_hype": not _HYPE.search(stripped),
