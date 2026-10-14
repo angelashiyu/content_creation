@@ -5,5 +5,5 @@
   {"id": "citations", "topic": "citations in AI answers vs. classic backlinks", "max_words": 80},
   {"id": "agencies", "topic": "AI answer visibility for agencies", "max_words": 80},
   {"id": "short", "topic": "AI SEO", "max_words": 40},
-  {"id": "not_in_context", "topic": "our pricing and customer results", "max_words": 80}
+  {"id": "not_in_context", "topic": "our pricing and customer results", "max_words": 80, "expect_no_post": true}
 ]

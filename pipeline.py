@@ -3,7 +3,7 @@ import asyncio
 from approval_bot import ApprovalBot
 from mastodon_post import post_status
 from notion_fetch import get_context_text
-from post_generator import generate_post as llm_generate_post
+from post_generator import NO_POST, generate_post as llm_generate_post
 from retrieval import build_context
 
 
@@ -20,6 +20,9 @@ async def main():
 
     try:
         post = generate_post()
+        if post == NO_POST:
+            print("No post drafted: the company context does not cover this topic.")
+            return
         decision, reason = await approval.request_approval(post, timeout_s=1800)
 
         # DRY_RUN=true prints instead of publishing

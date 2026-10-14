@@ -132,5 +132,5 @@ Things to know when reading the numbers:
 
 ## Known limitations
 
-- **Posts may still invent facts.** On a topic the Notion page does not cover, the model used to make up details. The post prompt now forbids this, but the `not_in_context` eval case has not been rerun since the change.
+- **Declining is new and lightly tested.** On a topic the Notion page cannot support (for example pricing), the generator returns `NO_POST` and the pipeline drafts nothing. In a first check it declined the `not_in_context` case 3 times out of 3, but it also declined 1 of 5 ordinary topics. The full posts suite has not been rerun since this change.
 - **Rejection reasons are not used.** The reason is printed, but no new draft is generated from it.

@@ -20,7 +20,7 @@ from statistics import mean
 from chunking import chunk_document
 from generate_replies import generate_replies
 from llm import DEFAULT_MODEL
-from post_generator import generate_post
+from post_generator import NO_POST, generate_post
 from retrieval import build_context, retrieve_top_k
 from evals.checks import check_post, check_replies
 from evals.judge import MIN_PASSING_SCORE, POST_RUBRIC, REPLY_RUBRIC, judge
@@ -76,8 +76,11 @@ def run_posts(document: str, n: int, model: str | None, judge_model: str | None)
                 rec["error"] = _error(e)
                 continue
             rec["output"] = post
-            rec["checks"] = check_post(post, case["max_words"])
-            if judge_model:
+            if case.get("expect_no_post"):
+                rec["checks"] = {"declined": post == NO_POST}
+            else:
+                rec["checks"] = {"wrote_post": post != NO_POST, **check_post(post, case["max_words"])}
+            if judge_model and post != NO_POST:
                 material = f"Company context:\n{context}\n\nRequested topic: {case['topic']}\n\nPost to score:\n{post}"
                 _add_judgement(rec, POST_RUBRIC, [material], judge_model)
             print("." if passed(rec) else "F", end="", flush=True)
