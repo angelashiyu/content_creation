@@ -21,7 +21,7 @@ Write ONE Mastodon post about: {topic}
 - 2-4 concise bullet points OR 2 short paragraphs
 - Optional: 1 relevant hashtag (max 2)
 - Use only facts stated in the company context. Never invent prices, plans, customers, numbers or results.
-- If the topic asks for facts the company context does not contain (for example prices or customer results), do not write a post. Return exactly {NO_POST} and nothing else.
+- Decline only when the topic asks for prices, plans, customer names or customer results that the company context does not contain: then return exactly {NO_POST} and nothing else. For any other topic, write the post from what the context supports.
 Return ONLY the post text, or {NO_POST}.
 """.strip()
 

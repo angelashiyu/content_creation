@@ -148,7 +148,9 @@ def summarize(records: list[dict]) -> dict:
         "errors": len(records) - len(ok),
         "judge_errors": sum("judge_error" in r for r in ok),
         "pass_rate": mean(passed(r) for r in records),
-        "checks": {name: mean(r["checks"][name] for r in ok) for name in (ok[0]["checks"] if ok else [])},
+        # cases can run different checks (a declined case has only "declined")
+        "checks": {name: mean(r["checks"][name] for r in ok if name in r["checks"])
+                   for name in dict.fromkeys(n for r in ok for n in r["checks"])},
         "judge": {c: mean(s[c] for s in judged) for c in (judged[0] if judged else [])},
     }
 

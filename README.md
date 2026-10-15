@@ -132,5 +132,5 @@ Things to know when reading the numbers:
 
 ## Known limitations
 
-- **Declining is new and lightly tested.** On a topic the Notion page cannot support (for example pricing), the generator returns `NO_POST` and the pipeline drafts nothing. In a first check it declined the `not_in_context` case 3 times out of 3, but it also declined 1 of 5 ordinary topics. The full posts suite has not been rerun since this change.
+- **Declining is new and lightly tested.** On a topic the Notion page cannot support (for example pricing), the generator returns `NO_POST` and the pipeline drafts nothing. It declines only for missing prices, plans, customer names or customer results. In a direct check it declined the `not_in_context` case 3 times out of 3 and wrote a post for each of 5 ordinary samples, but those posts have not yet been scored by the judge.
 - **Rejection reasons are not used.** The reason is printed, but no new draft is generated from it.
