@@ -1,8 +1,7 @@
 """LLM-as-judge: scores a piece of output 1-5 on each rubric criterion."""
 import json
-import re
 
-from llm import BRAND_VOICE, complete
+from llm import BRAND_VOICE, complete, parse_json_object
 
 POST_RUBRIC = {
     "grounded": "Every claim about the company or product is supported by the company context. Nothing invented (stats, customers, pricing, features).",
@@ -36,11 +35,7 @@ Criteria:
 Return ONLY valid JSON (no markdown) matching this shape, with integer scores:
 {json.dumps(shape)}"""
 
-    raw = complete(prompt, model=model)
-    match = re.search(r"\{.*\}", raw, re.S)
-    if not match:
-        raise ValueError(f"judge returned no JSON: {raw[:200]!r}")
-    data = json.loads(match.group(0))
+    data = parse_json_object(complete(prompt, model=model))
     scores = {name: int(data[name]) for name in rubric}
     if not all(1 <= s <= 5 for s in scores.values()):
         raise ValueError(f"judge scores out of range: {scores}")

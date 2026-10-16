@@ -7,6 +7,13 @@ load_dotenv()
 
 BASE_URL = os.environ["MASTODON_BASE_URL"].rstrip("/")
 TOKEN = os.environ["MASTODON_ACCESS_TOKEN"]
+MAX_RETRIES = 3  # on 429 rate limiting
+
+def _retry_after_s(r: requests.Response) -> int:
+    try:
+        return int(r.headers.get("Retry-After", "5"))
+    except ValueError:  # an HTTP date instead of seconds
+        return 5
 
 def post_status(
     text: str,
@@ -24,13 +31,12 @@ def post_status(
     if media_ids:
         data["media_ids[]"] = media_ids
 
-    r = requests.post(url, headers=headers, data=data, timeout=30)
-
-    # basic rate-limit handling
-    if r.status_code == 429:
-        retry_after = int(r.headers.get("Retry-After", "5"))
-        time.sleep(retry_after)
-        return post_status(text, visibility=visibility, in_reply_to_id=in_reply_to_id, media_ids=media_ids)
+    # a 429 means nothing was posted, so retrying cannot duplicate the status
+    for attempt in range(MAX_RETRIES + 1):
+        r = requests.post(url, headers=headers, data=data, timeout=30)
+        if r.status_code != 429 or attempt == MAX_RETRIES:
+            break
+        time.sleep(_retry_after_s(r))
 
     r.raise_for_status()
     return r.json()

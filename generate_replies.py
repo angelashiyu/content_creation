@@ -1,5 +1,5 @@
 import json
-from llm import BRAND_VOICE, complete
+from llm import BRAND_VOICE, complete, parse_json_object
 
 BRAND_DOCS = f"""\
 You are the brand voice for a GenAI marketing intelligence platform.
@@ -44,8 +44,7 @@ Statuses to reply to (your in_reply_to_id must match each status id):
 {json.dumps(statuses, ensure_ascii=False)}
 """
 
-    raw = complete(prompt, model=model)
-    batch = json.loads(raw)
+    batch = parse_json_object(complete(prompt, model=model))
     if isinstance(batch, dict) and isinstance(batch.get("replies"), list):
         for r in batch["replies"]:
             if isinstance(r, dict):
@@ -54,7 +53,7 @@ Statuses to reply to (your in_reply_to_id must match each status id):
 
 if __name__ == "__main__":
     test_statuses = [
-        {"id": "123", "author": "someone", "text": "AI SEO feels chaotic—how do you measure impact?", "url": "", "language": "en"},
-        {"id": "456", "author": "other", "text": "Any practical checklist for showing up in LLM answers?", "url": "", "language": "en"},
+        {"id": "123", "author": "someone", "content_text": "AI SEO feels chaotic—how do you measure impact?", "url": "", "language": "en"},
+        {"id": "456", "author": "other", "content_text": "Any practical checklist for showing up in LLM answers?", "url": "", "language": "en"},
     ]
     print(generate_replies(test_statuses))

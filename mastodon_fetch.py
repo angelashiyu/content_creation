@@ -8,7 +8,8 @@ load_dotenv()
 
 BASE_URL = os.environ["MASTODON_BASE_URL"].rstrip("/")
 TOKEN = os.environ["MASTODON_ACCESS_TOKEN"]
-MY_ACCT = "angelashiyu" 
+# statuses from this account are skipped, so the bot never replies to itself
+MY_ACCT = os.environ.get("MASTODON_ACCT", "angelashiyu")
 
 def html_to_text(html: str) -> str:
     # Strip tags + decode entities

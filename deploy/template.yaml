@@ -1,0 +1,159 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Runs the genai-post pipeline as a scheduled Fargate task.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Public subnets; the task needs outbound internet to reach Notion, OpenRouter, Telegram and Mastodon.
+  ScheduleExpression:
+    Type: String
+    Default: "cron(0 9 * * ? *)"
+  ScheduleTimezone:
+    Type: String
+    Default: UTC
+  DryRun:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+  SsmPrefix:
+    Type: String
+    Default: /genai-post
+  ImageTag:
+    Type: String
+    Default: latest
+
+Resources:
+  Repository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: genai-post
+      EmptyOnDelete: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules": [{"rulePriority": 1, "description": "Keep the last 5 images",
+            "selection": {"tagStatus": "any", "countType": "imageCountMoreThan", "countNumber": 5},
+            "action": {"type": "expire"}}]}
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/genai-post
+      RetentionInDays: 30
+
+  # Used by ECS itself to pull the image, write logs and read the secrets
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: read-secrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ssm:GetParameters
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/*
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: genai-post
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "256"
+      Memory: "512"
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: pipeline
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Repository}:${ImageTag}
+          Essential: true
+          Environment:
+            - { Name: DRY_RUN, Value: !Ref DryRun }
+          Secrets:
+            - { Name: MASTODON_BASE_URL, ValueFrom: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/MASTODON_BASE_URL" }
+            - { Name: MASTODON_ACCESS_TOKEN, ValueFrom: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/MASTODON_ACCESS_TOKEN" }
+            - { Name: OPENROUTER_API_KEY, ValueFrom: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/OPENROUTER_API_KEY" }
+            - { Name: NOTION_TOKEN, ValueFrom: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/NOTION_TOKEN" }
+            - { Name: TELEGRAM_BOT_TOKEN, ValueFrom: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/TELEGRAM_BOT_TOKEN" }
+            - { Name: TELEGRAM_CHAT_ID, ValueFrom: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/TELEGRAM_CHAT_ID" }
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: pipeline
+
+  # Outbound only; nothing connects in (the Telegram bot polls)
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: genai-post task, egress only
+      VpcId: !Ref VpcId
+
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: scheduler.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: run-task
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecs:RunTask
+                Resource: !Sub arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/genai-post:*
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt ExecutionRole.Arn
+
+  Schedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      ScheduleExpression: !Ref ScheduleExpression
+      ScheduleExpressionTimezone: !Ref ScheduleTimezone
+      FlexibleTimeWindow: { Mode: "OFF" }
+      State: ENABLED
+      Target:
+        Arn: !GetAtt Cluster.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        # No retries: a retried run would send a second draft for approval
+        RetryPolicy: { MaximumRetryAttempts: 0 }
+        EcsParameters:
+          TaskDefinitionArn: !Ref TaskDefinition
+          LaunchType: FARGATE
+          TaskCount: 1
+          NetworkConfiguration:
+            AwsvpcConfiguration:
+              Subnets: !Ref SubnetIds
+              SecurityGroups: [!GetAtt SecurityGroup.GroupId]
+              AssignPublicIp: ENABLED
+
+Outputs:
+  RepositoryUri:
+    Value: !GetAtt Repository.RepositoryUri
+  ClusterName:
+    Value: !Ref Cluster
+  TaskDefinitionArn:
+    Value: !Ref TaskDefinition
+  SecurityGroupId:
+    Value: !GetAtt SecurityGroup.GroupId

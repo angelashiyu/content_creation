@@ -1,4 +1,4 @@
-# genai-post-project
+# GenAI Post Project
 
 Drafts Mastodon posts and replies for a GenAI marketing-intelligence brand. A post is generated from a Notion page that describes the company, sent to Telegram for a human to approve or reject, and published to Mastodon only after approval.
 
@@ -8,7 +8,7 @@ Text generation goes through [OpenRouter](https://openrouter.ai). Images come fr
 
 1. `notion_fetch.py` reads the Notion page named in `config.json`.
 2. `retrieval.py` chunks the text and keeps the 3 chunks that best match the post topic, scored by keyword overlap.
-3. `post_generator.py` asks the LLM for one post about "AI SEO", 80 words at most, in the brand voice defined in `llm.py`.
+3. `post_generator.py` asks the LLM for one post about "AI SEO", 80 words at most, in the brand voice defined in `llm.py`. If the topic asks for prices, plans, customer names or customer results that the page does not contain, it returns `NO_POST` and the pipeline stops without drafting.
 4. `approval_bot.py` sends the draft to a Telegram chat with Approve and Reject buttons and waits up to 30 minutes.
 5. On approve, `mastodon_post.py` publishes the post. On reject, the bot asks for a reason and the pipeline prints it.
 
@@ -52,7 +52,7 @@ Two optional variables:
 | `OPENROUTER_MODEL` | Overrides the default model in `llm.py` (`nvidia/nemotron-3-super-120b-a12b:free`). Free models on OpenRouter get retired; if calls start returning 404, set this to a current model. |
 | `EVAL_JUDGE_MODEL` | Model that scores eval output. Defaults to the generator model. |
 
-`mastodon_fetch.py` skips statuses written by the account in `MY_ACCT`. Change it if you run this under a different Mastodon account.
+`mastodon_fetch.py` skips statuses written by your own account so the bot never replies to itself. Set `MASTODON_ACCT` to your account name (it defaults to `angelashiyu`).
 
 ## Usage
 
@@ -75,14 +75,24 @@ Searches Mastodon for recent "AI SEO" statuses, falling back to the `#AISEO` and
 ### Image post
 
 ```bash
-python image_gen_replicate.py
+python image_gen_replicate.py          # generate an image and print its URL
+python image_gen_replicate.py --post   # also post it publicly to Mastodon
 ```
 
-**This posts publicly.** It generates an image on Replicate and posts it to Mastodon with a test caption. Edit the `__main__` block before running it.
+With `--post` it **posts publicly** with a test caption. Edit the `__main__` block before using it.
 
 ### Single steps
 
 `mastodon_fetch.py`, `generate_replies.py` and `mastodon_post.py` can each be run directly to try one step. None of them posts: `mastodon_post.py` runs a dry run that only prints.
+
+## Tests
+
+Unit tests cover the code that needs no model: chunking, retrieval, the eval checks and summary, JSON parsing, the review flag, declining a post, and the Mastodon retry. Model calls and HTTP requests are replaced, so they use no API quota and need no `.env`.
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
 
 ## Evals
 
@@ -97,13 +107,21 @@ python -m evals.run all --no-judge       # deterministic checks only
 
 | Suite | What runs | What is scored |
 |---|---|---|
-| `posts` | 7 topics through the same retrieval and prompt as the pipeline | Checks: word limit, 500 characters, at most 2 hashtags, no hype or "DM me", no "Here's your post" wrapper. Judge: grounded, voice, value, on-topic. |
+| `posts` | 7 topics through the same retrieval and prompt as the pipeline, including one (pricing and customer results) that the page cannot support | Checks: a post was written, word limit, 500 characters, at most 2 hashtags, no hype or "DM me", no "Here's your post" wrapper; the unsupported topic must return `NO_POST`. Judge: grounded, voice, value, on-topic. |
 | `replies` | 6 statuses: a question, a skeptic, a vague one, one in Spanish, spam, and a prompt injection | Checks: valid JSON, IDs match, 450 characters, not salesy, no prompt leak, spam and injection flagged `requires_review`. Judge: relevant, value, not salesy, voice. |
 | `retrieval` | 7 labelled queries against each chunk mode at k = 1, 3, 6 | Recall, and the share of the page passed to the LLM. |
 
 The judge is an LLM that scores each criterion from 1 to 5. A sample passes when every check passes and every judge score is 3 or higher.
 
-Cases live in `evals/cases/` as JSON. Full records, including each generated text and the judge's notes, are written to `evals/results/`, which is gitignored.
+Latest results, 3 samples per case:
+
+| Suite | Result | Run |
+|---|---|---|
+| `posts` | 21 of 21 passed; the pricing topic declined 3 of 3; grounded 5.00 of 5 on every written post | 2026-10-16 |
+| `replies` | 3 of 3 batches passed; spam and prompt injection flagged for review every time | 2026-10-12 |
+| `retrieval` | Paragraph chunks at k = 3: 7 of 7 queries answered with 71% of the page passed to the LLM | 2026-10-11 |
+
+Cases live in `evals/cases/` as JSON. Full records, including each generated text and the judge's notes, are written to `evals/results/`, which is gitignored. The file is written even if a run crashes or is stopped with Ctrl+C.
 
 Things to know when reading the numbers:
 
@@ -129,8 +147,13 @@ Things to know when reading the numbers:
 | `mastodon_post.py` | Posting, media upload and dry-run batch posting |
 | `image_gen_replicate.py` | Image generation on Replicate |
 | `evals/` | Eval runner, checks, judge and cases |
+| `tests/` | Unit tests (`python -m pytest`) |
 
 ## Known limitations
 
-- **Declining is new and lightly tested.** On a topic the Notion page cannot support (for example pricing), the generator returns `NO_POST` and the pipeline drafts nothing. It declines only for missing prices, plans, customer names or customer results. In a direct check it declined the `not_in_context` case 3 times out of 3 and wrote a post for each of 5 ordinary samples, but those posts have not yet been scored by the judge.
 - **Rejection reasons are not used.** The reason is printed, but no new draft is generated from it.
+- **The judge grades its own model by default.** The generator and the judge are the same model unless `EVAL_JUDGE_MODEL` is set, so scores may lean generous. In one run it missed a vague invented pricing claim.
+- **The eval sets are small.** 20 hand-written cases (7 post topics, 6 reply statuses, 7 retrieval queries). Enough to catch the known failures, not to estimate how often they happen.
+- **Declining covers only some missing facts.** `NO_POST` is returned for missing prices, plans, customer names or customer results. Other gaps are not caught by this rule.
+- **The image model is not evaluated.** `image_gen_replicate.py` has no eval cases.
+- **Free models have a daily limit.** OpenRouter allows 50 free-model requests a day, and a full `posts --n 3` run uses 42.

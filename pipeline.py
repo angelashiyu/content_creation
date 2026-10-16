@@ -8,7 +8,6 @@ from retrieval import build_context
 
 
 def generate_post(topic: str = "AI SEO") -> str:
-    # Step 4: RAG retrieval
     context_for_llm = build_context(get_context_text(), query=topic)
 
     post = llm_generate_post(context_for_llm, topic=topic, max_words=80)
@@ -30,10 +29,10 @@ async def main():
 
         if decision == "approve":
             if dry:
-                print(" DRY_RUN: would publish this:\n", post)
+                print("DRY_RUN: would publish this:\n", post)
             else:
                 post_status(post)
-                print("Accepted.Published to Mastodon.")
+                print("Approved. Published to Mastodon.")
         elif decision == "reject":
             print(f"Rejected. Reason: {reason}")
         else:

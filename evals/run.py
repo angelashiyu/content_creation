@@ -63,8 +63,8 @@ def passed(rec: dict) -> bool:
     return all(s >= MIN_PASSING_SCORE for s in scores.values())
 
 
-def run_posts(document: str, n: int, model: str | None, judge_model: str | None) -> list[dict]:
-    records = []
+def run_posts(document: str, n: int, model: str | None, judge_model: str | None, records: list | None = None) -> list[dict]:
+    records = [] if records is None else records
     for case in load_cases("posts"):
         context = build_context(document, query=case["topic"])  # same call as pipeline.generate_post
         for i in range(n):
@@ -88,12 +88,12 @@ def run_posts(document: str, n: int, model: str | None, judge_model: str | None)
     return records
 
 
-def run_replies(n: int, model: str | None, judge_model: str | None) -> list[dict]:
+def run_replies(n: int, model: str | None, judge_model: str | None, records: list | None = None) -> list[dict]:
     cases = load_cases("replies")
     # the generator only ever sees the normalized status shape from mastodon_fetch
     statuses = [{k: v for k, v in s.items() if k != "expect_review"} for s in cases]
     by_id = {s["id"]: s for s in statuses}
-    records = []
+    records = [] if records is None else records
     for i in range(n):
         rec = {"case": "batch", "sample": i}
         records.append(rec)
@@ -197,7 +197,7 @@ def main() -> None:
 
     judge_model = None
     if uses_llm and not args.no_judge:
-        judge_model =args.judge_model or os.environ.get("EVAL_JUDGE_MODEL") or DEFAULT_MODEL
+        judge_model = args.judge_model or os.environ.get("EVAL_JUDGE_MODEL") or DEFAULT_MODEL
 
     document = ""
     if suites != ["replies"]:
@@ -216,23 +216,29 @@ def main() -> None:
         },
         "suites": {},
     }
-    for name in suites:
-        if name == "retrieval":
-            rows = run_retrieval(document)
-            print_retrieval(rows)
-            results["suites"][name] = {"rows": rows}
-            continue
-        print(f"running {name} ", end="", flush=True)
-        records = run_posts(document, args.n, args.model, judge_model) if name == "posts" \
-            else run_replies(args.n, args.model, judge_model)
-        summary = summarize(records)
-        print_summary(name, summary, records)
-        results["suites"][name] = {"summary": summary, "records": records}
-
     out = HERE / "results" / f"{datetime.now():%Y%m%d-%H%M%S}-{args.suite}.json"
-    out.parent.mkdir(exist_ok=True)
-    out.write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"\nwrote {out.relative_to(HERE.parent)}")
+    # written in finally so a crash or Ctrl+C keeps the samples already paid for
+    try:
+        for name in suites:
+            if name == "retrieval":
+                rows = run_retrieval(document)
+                print_retrieval(rows)
+                results["suites"][name] = {"rows": rows}
+                continue
+            print(f"running {name} ", end="", flush=True)
+            records: list[dict] = []
+            results["suites"][name] = {"records": records}
+            if name == "posts":
+                run_posts(document, args.n, args.model, judge_model, records)
+            else:
+                run_replies(args.n, args.model, judge_model, records)
+            summary = summarize(records)
+            results["suites"][name]["summary"] = summary
+            print_summary(name, summary, records)
+    finally:
+        out.parent.mkdir(exist_ok=True)
+        out.write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"\nwrote {out.relative_to(HERE.parent)}")
 
 
 if __name__ == "__main__":

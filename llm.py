@@ -1,4 +1,6 @@
+import json
 import os
+import re
 from functools import cache
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -16,6 +18,13 @@ def _client() -> OpenAI:
         api_key=os.environ["OPENROUTER_API_KEY"],
         base_url="https://openrouter.ai/api/v1",
     )
+
+def parse_json_object(raw: str) -> dict:
+    """The first {...} in model output; tolerates code fences and text around the JSON."""
+    match = re.search(r"\{.*\}", raw, re.S)
+    if not match:
+        raise ValueError(f"model returned no JSON object: {raw[:200]!r}")
+    return json.loads(match.group(0))
 
 def complete(prompt: str | list[dict], model: str | None = None) -> str:
     resp = _client().responses.create(model=model or DEFAULT_MODEL, input=prompt)

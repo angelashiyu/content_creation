@@ -1,3 +1,4 @@
+import sys
 from dotenv import load_dotenv
 from pathlib import Path
 import replicate
@@ -36,6 +37,9 @@ def generate_image(scene: str, fast: bool = True) -> str:
 
 if __name__ == "__main__":
     img_url = generate_image("black dog in a clean vector icon style, favicon, white background")
+    print("Image:", img_url)
+    if "--post" not in sys.argv:
+        sys.exit("Not posted. Run with --post to publish it publicly to Mastodon.")
     media_id = upload_media_from_url(img_url, alt_text="Vector icon of a black dog (favicon style)")
     resp = post_status("Testing my fine-tuned model 🔥", visibility="public", media_ids=[media_id])
     print("Posted:", resp.get("url"))
