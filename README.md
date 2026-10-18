@@ -52,7 +52,7 @@ Two optional variables:
 | `OPENROUTER_MODEL` | Overrides the default model in `llm.py` (`nvidia/nemotron-3-super-120b-a12b:free`). Free models on OpenRouter get retired; if calls start returning 404, set this to a current model. |
 | `EVAL_JUDGE_MODEL` | Model that scores eval output. Defaults to the generator model. |
 
-`mastodon_fetch.py` skips statuses written by your own account so the bot never replies to itself. Set `MASTODON_ACCT` to your account name (it defaults to `angelashiyu`).
+`mastodon_fetch.py` skips statuses written by the account in `MY_ACCT`. Change it if you run this under a different Mastodon account.
 
 ## Usage
 
@@ -75,24 +75,14 @@ Searches Mastodon for recent "AI SEO" statuses, falling back to the `#AISEO` and
 ### Image post
 
 ```bash
-python image_gen_replicate.py          # generate an image and print its URL
-python image_gen_replicate.py --post   # also post it publicly to Mastodon
+python image_gen_replicate.py
 ```
 
-With `--post` it **posts publicly** with a test caption. Edit the `__main__` block before using it.
+**This posts publicly.** It generates an image on Replicate and posts it to Mastodon with a test caption. Edit the `__main__` block before running it.
 
 ### Single steps
 
 `mastodon_fetch.py`, `generate_replies.py` and `mastodon_post.py` can each be run directly to try one step. None of them posts: `mastodon_post.py` runs a dry run that only prints.
-
-## Tests
-
-Unit tests cover the code that needs no model: chunking, retrieval, the eval checks and summary, JSON parsing, the review flag, declining a post, and the Mastodon retry. Model calls and HTTP requests are replaced, so they use no API quota and need no `.env`.
-
-```bash
-pip install -r requirements-dev.txt
-python -m pytest
-```
 
 ## Evals
 
@@ -121,7 +111,7 @@ Latest results, 3 samples per case:
 | `replies` | 3 of 3 batches passed; spam and prompt injection flagged for review every time | 2026-10-12 |
 | `retrieval` | Paragraph chunks at k = 3: 7 of 7 queries answered with 71% of the page passed to the LLM | 2026-10-11 |
 
-Cases live in `evals/cases/` as JSON. Full records, including each generated text and the judge's notes, are written to `evals/results/`, which is gitignored. The file is written even if a run crashes or is stopped with Ctrl+C.
+Cases live in `evals/cases/` as JSON. Full records, including each generated text and the judge's notes, are written to `evals/results/`, which is gitignored.
 
 Things to know when reading the numbers:
 
@@ -147,7 +137,6 @@ Things to know when reading the numbers:
 | `mastodon_post.py` | Posting, media upload and dry-run batch posting |
 | `image_gen_replicate.py` | Image generation on Replicate |
 | `evals/` | Eval runner, checks, judge and cases |
-| `tests/` | Unit tests (`python -m pytest`) |
 
 ## Known limitations
 
@@ -156,4 +145,3 @@ Things to know when reading the numbers:
 - **The eval sets are small.** 20 hand-written cases (7 post topics, 6 reply statuses, 7 retrieval queries). Enough to catch the known failures, not to estimate how often they happen.
 - **Declining covers only some missing facts.** `NO_POST` is returned for missing prices, plans, customer names or customer results. Other gaps are not caught by this rule.
 - **The image model is not evaluated.** `image_gen_replicate.py` has no eval cases.
-- **Free models have a daily limit.** OpenRouter allows 50 free-model requests a day, and a full `posts --n 3` run uses 42.

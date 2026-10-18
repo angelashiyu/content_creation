@@ -39,16 +39,21 @@ class ApprovalBot:
 
         self.app.add_handler(CallbackQueryHandler(self._on_button))
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_text))
+        self.app.add_error_handler(self._on_error)
 
     async def start(self) -> None:
         await self.app.initialize()
         await self.app.start()
-        await self.app.updater.start_polling()
+        # skip button taps and messages queued while no run was listening
+        await self.app.updater.start_polling(drop_pending_updates=True)
 
     async def stop(self) -> None:
         await self.app.updater.stop()
         await self.app.stop()
         await self.app.shutdown()
+
+    async def notify(self, text: str) -> None:
+        await self.app.bot.send_message(chat_id=CHAT_ID, text=text)
 
     async def request_approval(self, post_text: str, timeout_s: int = 3600) -> Tuple[str, Optional[str]]:
         """
@@ -125,6 +130,10 @@ class ApprovalBot:
             return
 
         await query.edit_message_text(f"Unknown action: {action}")
+
+    async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        # one line instead of a traceback, e.g. for expired button taps
+        print(f"Telegram handler error: {context.error}")
 
     async def _on_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message or not update.message.text:
