@@ -3,7 +3,8 @@ from llm import BRAND_VOICE, complete
 # returned instead of a post when the company context cannot support the topic
 NO_POST = "NO_POST"
 
-def generate_post(context: str, topic: str = "AI SEO", max_words: int = 80, model: str | None = None) -> str:
+
+def generate_post(context, topic="AI SEO", max_words=80, model=None):
     system = (
         "You write social posts for a GenAI marketing intelligence platform.\n"
         f"Voice: {BRAND_VOICE}\n"
@@ -25,11 +26,12 @@ Write ONE Mastodon post about: {topic}
 Return ONLY the post text, or {NO_POST}.
 """.strip()
 
-    post = complete(
-        [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        model=model,
-    )
-    return NO_POST if NO_POST in post else post
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    post = complete(messages, model=model)
+
+    if NO_POST in post:
+        return NO_POST
+    return post

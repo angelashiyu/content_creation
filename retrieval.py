@@ -1,34 +1,36 @@
 import re
-from typing import List, Tuple
 from chunking import chunk_document
 
+# brand words, used to choose between chunks that match the topic equally well
 DEFAULT_QUERY = "GenAI AI LLM marketing visibility SEO GEO"
 
-_WORD = re.compile(r"[a-z0-9]+")
 
-def _tokens(text: str) -> set[str]:
-    return set(_WORD.findall(text.lower()))
+def get_words(text):
+    # lowercase words and numbers, e.g. "AI-SEO tips!" -> {"ai", "seo", "tips"}
+    return set(re.findall(r"[a-z0-9]+", text.lower()))
 
-def retrieve_top_k(query: str, chunks: List[str], k: int = 6, tiebreak: str = "") -> List[str]:
-    q = _tokens(query)
-    if not q:
-        return chunks[:k]
-    tb = _tokens(tiebreak)
 
-    scored: List[Tuple[int, int, int, str]] = []
-    for i, ch in enumerate(chunks):
-        t = _tokens(ch)
-        score = len(q & t)  # overlap count
-        scored.append((score, len(tb & t), i, ch))
+def retrieve_top_k(query, chunks, k=6, tiebreak=""):
+    query_words = get_words(query)
+    tiebreak_words = get_words(tiebreak)
 
-    # sort: highest score first, then most tiebreak words, then original order
-    scored.sort(key=lambda x: (-x[0], -x[1], x[2]))
+    scored = []
+    for chunk in chunks:
+        chunk_words = get_words(chunk)
+        score = len(query_words & chunk_words)  # how many query words the chunk contains
+        if score > 0:
+            bonus = len(tiebreak_words & chunk_words)
+            scored.append({"chunk": chunk, "score": score, "bonus": bonus})
 
-    # keep non-zero matches; fallback to first k if none match
-    top = [ch for score, _, _, ch in scored if score > 0][:k]
-    return top if top else chunks[:k]
+    if not scored:
+        return chunks[:k]  # nothing matched, so use the start of the page
 
-def build_context(document: str, query: str = DEFAULT_QUERY, k: int = 6) -> str:
+    # best score first, then the most brand words; equal chunks keep their page order
+    scored.sort(key=lambda c: (c["score"], c["bonus"]), reverse=True)
+    return [c["chunk"] for c in scored[:k]]
+
+
+def build_context(document, query=DEFAULT_QUERY, k=6):
     chunks = chunk_document(document, mode="paragraph", target_chars=500)
-    # short topics like "AI SEO" tie on many chunks; brand terms pick among them
-    return "\n\n---\n\n".join(retrieve_top_k(query, chunks, k=k, tiebreak=DEFAULT_QUERY))
+    top_chunks = retrieve_top_k(query, chunks, k=k, tiebreak=DEFAULT_QUERY)
+    return "\n\n---\n\n".join(top_chunks)

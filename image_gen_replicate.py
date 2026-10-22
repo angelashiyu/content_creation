@@ -1,45 +1,35 @@
 import sys
-from dotenv import load_dotenv
-from pathlib import Path
 import replicate
+from dotenv import load_dotenv
 from mastodon_post import post_status, upload_media_from_url
 
-load_dotenv(dotenv_path=Path(__file__).with_name(".env"))
+load_dotenv()
 
+# my fine-tuned image model on Replicate; TRIGGER is the word it was trained on
 MODEL_ID = "sundai-club/ai_seo_promo_pics:0dfeb4c2070249fcb7306f098fa13cdc2a3fd35eff48d5b05f7988b4621f53d0"
 TRIGGER = "ANGZIKI9"
 
-def generate_image(scene: str, fast: bool = True) -> str:
-    """
-    Returns an image URL.
-    scene: what you want the subject doing / style
-    fast: use schnell (4 steps) vs dev (28 steps)
-    """
-    prompt = f"{TRIGGER} {scene}"
 
+def generate_image(scene, fast=True):
+    """Returns an image URL. fast=True uses the quick "schnell" model, False the slower "dev" one."""
+    inputs = {"prompt": f"{TRIGGER} {scene}", "guidance_scale": 7.5}
     if fast:
-        inputs = {
-            "prompt": prompt,
-            "model": "schnell",
-            "num_inference_steps": 4,
-            "guidance_scale": 7.5,
-        }
+        inputs["model"] = "schnell"
+        inputs["num_inference_steps"] = 4
     else:
-        inputs = {
-            "prompt": prompt,
-            "model": "dev",
-            "num_inference_steps": 28,
-            "guidance_scale": 7.5,
-        }
+        inputs["model"] = "dev"
+        inputs["num_inference_steps"] = 28
 
-    out = replicate.run(MODEL_ID, input=inputs)
-    return str(out[0])  # Replicate returns a list of URLs
+    output = replicate.run(MODEL_ID, input=inputs)
+    return str(output[0])  # Replicate returns a list of image URLs
+
 
 if __name__ == "__main__":
-    img_url = generate_image("black dog in a clean vector icon style, favicon, white background")
-    print("Image:", img_url)
+    image_url = generate_image("black dog in a clean vector icon style, favicon, white background")
+    print("Image:", image_url)
     if "--post" not in sys.argv:
         sys.exit("Not posted. Run with --post to publish it publicly to Mastodon.")
-    media_id = upload_media_from_url(img_url, alt_text="Vector icon of a black dog (favicon style)")
-    resp = post_status("Testing my fine-tuned model 🔥", visibility="public", media_ids=[media_id])
-    print("Posted:", resp.get("url"))
+
+    media_id = upload_media_from_url(image_url, alt_text="Vector icon of a black dog (favicon style)")
+    response = post_status("Testing my fine-tuned model 🔥", visibility="public", media_ids=[media_id])
+    print("Posted:", response.get("url"))

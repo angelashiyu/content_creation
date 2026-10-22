@@ -4,10 +4,10 @@ Eval runner. Run from the repo root:
   python -m evals.run retrieval                 # no LLM calls
   python -m evals.run posts --n 3               # 3 samples per case
   python -m evals.run replies --model some/model --judge-model other/model
-  python -m evals.run all --no-judge            # deterministic checks only
+  python -m evals.run all --no-judge            # rule checks only
 
-Nothing is posted anywhere. Full records are written to evals/results/.
-The company context is fetched from Notion unless --context-file is given.
+Nothing is posted anywhere. Full results are saved in evals/results/.
+The company context comes from Notion unless --context-file is given.
 """
 import argparse
 import hashlib
@@ -27,154 +27,196 @@ from evals.judge import MIN_PASSING_SCORE, POST_RUBRIC, REPLY_RUBRIC, judge
 
 HERE = Path(__file__).parent
 
-# first entry is what retrieval.build_context uses
-CHUNK_CONFIGS = [
+# chunk settings to compare; the first one is what the pipeline uses
+CHUNK_SETTINGS = [
     ("paragraph", {"target_chars": 500}),
     ("sentences", {"sentences_per_chunk": 4}),
     ("chars", {"size": 500}),
 ]
-KS = (1, 3, 6)
+K_VALUES = [1, 3, 6]
 
 
-def load_cases(name: str) -> list[dict]:
-    return json.loads((HERE / "cases" / f"{name}.json").read_text(encoding="utf-8"))
+def load_cases(name):
+    path = HERE / "cases" / f"{name}.json"
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _error(e: Exception) -> str:
+def error_text(e):
     return f"{type(e).__name__}: {e}"
 
 
-def _add_judgement(rec: dict, rubric: dict, materials: list[str], judge_model: str) -> None:
+def add_judge_scores(record, rubric, materials, judge_model):
     try:
-        verdicts = [judge(rubric, m, judge_model) for m in materials]
+        verdicts = []
+        for material in materials:
+            verdicts.append(judge(rubric, material, judge_model))
     except Exception as e:
-        rec["judge_error"] = _error(e)
+        record["judge_error"] = error_text(e)
         return
-    rec["judge"] = {
-        "scores": {c: mean(v["scores"][c] for v in verdicts) for c in rubric},
-        "verdicts": verdicts,
-    }
+
+    # average each criterion over everything that was judged
+    scores = {}
+    for criterion in rubric:
+        scores[criterion] = mean(v["scores"][criterion] for v in verdicts)
+    record["judge"] = {"scores": scores, "verdicts": verdicts}
 
 
-def passed(rec: dict) -> bool:
-    if "error" in rec or not all(rec["checks"].values()):
+def passed(record):
+    if "error" in record:
         return False
-    scores = rec.get("judge", {}).get("scores", {})
-    return all(s >= MIN_PASSING_SCORE for s in scores.values())
+    if not all(record["checks"].values()):
+        return False
+    scores = record.get("judge", {}).get("scores", {})
+    return all(score >= MIN_PASSING_SCORE for score in scores.values())
 
 
-def run_posts(document: str, n: int, model: str | None, judge_model: str | None, records: list | None = None) -> list[dict]:
-    records = [] if records is None else records
+def show_progress(record):
+    # one character per sample: "." passed, "F" failed
+    print("." if passed(record) else "F", end="", flush=True)
+
+
+def run_posts(document, n, model, judge_model, records):
     for case in load_cases("posts"):
-        context = build_context(document, query=case["topic"])  # same call as pipeline.generate_post
+        context = build_context(document, query=case["topic"])  # same call as pipeline.write_draft
         for i in range(n):
-            rec = {"case": case["id"], "sample": i}
-            records.append(rec)
+            record = {"case": case["id"], "sample": i}
+            records.append(record)
             try:
                 post = generate_post(context, topic=case["topic"], max_words=case["max_words"], model=model)
             except Exception as e:
-                rec["error"] = _error(e)
+                record["error"] = error_text(e)
                 continue
-            rec["output"] = post
+
+            record["output"] = post
             if case.get("expect_no_post"):
-                rec["checks"] = {"declined": post == NO_POST}
+                record["checks"] = {"declined": post == NO_POST}
             else:
-                rec["checks"] = {"wrote_post": post != NO_POST, **check_post(post, case["max_words"])}
+                record["checks"] = {"wrote_post": post != NO_POST}
+                record["checks"].update(check_post(post, case["max_words"]))
+
             if judge_model and post != NO_POST:
                 material = f"Company context:\n{context}\n\nRequested topic: {case['topic']}\n\nPost to score:\n{post}"
-                _add_judgement(rec, POST_RUBRIC, [material], judge_model)
-            print("." if passed(rec) else "F", end="", flush=True)
+                add_judge_scores(record, POST_RUBRIC, [material], judge_model)
+            show_progress(record)
     print()
-    return records
 
 
-def run_replies(n: int, model: str | None, judge_model: str | None, records: list | None = None) -> list[dict]:
+def run_replies(n, model, judge_model, records):
     cases = load_cases("replies")
-    # the generator only ever sees the normalized status shape from mastodon_fetch
-    statuses = [{k: v for k, v in s.items() if k != "expect_review"} for s in cases]
-    by_id = {s["id"]: s for s in statuses}
-    records = [] if records is None else records
+
+    # the model only sees the status fields, not our expect_review answer
+    statuses = []
+    for case in cases:
+        status = dict(case)
+        status.pop("expect_review", None)
+        statuses.append(status)
+    status_text = {s["id"]: s["content_text"] for s in statuses}
+
     for i in range(n):
-        rec = {"case": "batch", "sample": i}
-        records.append(rec)
+        record = {"case": "batch", "sample": i}
+        records.append(record)
         try:
             batch = generate_replies(statuses, model=model)
-        except Exception as e:  # includes the model returning invalid JSON
-            rec["error"] = _error(e)
+        except Exception as e:  # also catches the model returning broken JSON
+            record["error"] = error_text(e)
             continue
-        rec["output"] = batch
-        rec["checks"] = check_replies(cases, batch)
-        if judge_model and rec["checks"]["schema_ok"]:
-            materials = [
-                f"Status being replied to:\n{by_id[r['in_reply_to_id']]['content_text']}\n\nReply to score:\n{r['reply_text']}"
-                for r in batch["replies"]
-                if r["in_reply_to_id"] in by_id
-            ]
+
+        record["output"] = batch
+        record["checks"] = check_replies(cases, batch)
+
+        if judge_model and record["checks"]["schema_ok"]:
+            materials = []
+            for reply in batch["replies"]:
+                if reply["in_reply_to_id"] in status_text:
+                    status = status_text[reply["in_reply_to_id"]]
+                    materials.append(f"Status being replied to:\n{status}\n\nReply to score:\n{reply['reply_text']}")
             if materials:
-                _add_judgement(rec, REPLY_RUBRIC, materials, judge_model)
-        print("." if passed(rec) else "F", end="", flush=True)
+                add_judge_scores(record, REPLY_RUBRIC, materials, judge_model)
+        show_progress(record)
     print()
-    return records
 
 
-def run_retrieval(document: str) -> list[dict]:
+def run_retrieval(document):
     cases = load_cases("retrieval")
     rows = []
-    for mode, kwargs in CHUNK_CONFIGS:
-        chunks = chunk_document(document, mode=mode, **kwargs)
-        for k in KS:
-            hits, ratios = [], []
+    for mode, options in CHUNK_SETTINGS:
+        chunks = chunk_document(document, mode=mode, **options)
+        for k in K_VALUES:
+            hits = []
+            ratios = []
+            misses = []
             for case in cases:
-                got = "\n".join(retrieve_top_k(case["query"], chunks, k=k))
-                hits.append(all(e.lower() in got.lower() for e in case["expect"]))
-                ratios.append(len(got) / len(document))
+                found = "\n".join(retrieve_top_k(case["query"], chunks, k=k))
+                hit = all(phrase.lower() in found.lower() for phrase in case["expect"])
+                hits.append(hit)
+                if not hit:
+                    misses.append(case["query"])
+                ratios.append(len(found) / len(document))
             rows.append({
                 "mode": mode,
                 "chunks": len(chunks),
                 "k": k,
                 "recall": mean(hits),
-                # share of the document handed to the LLM; 1.0 means retrieval filtered nothing
+                # share of the page sent to the LLM; 1.0 means retrieval filtered nothing
                 "context_ratio": mean(ratios),
-                "misses": [c["query"] for c, h in zip(cases, hits) if not h],
+                "misses": misses,
             })
     return rows
 
 
-def summarize(records: list[dict]) -> dict:
+def summarize(records):
     ok = [r for r in records if "error" not in r]
-    judged = [r["judge"]["scores"] for r in ok if "judge" in r]
+
+    # collect every result per check; cases can have different checks (a declined case only has "declined")
+    check_results = {}
+    judge_results = {}
+    judge_errors = 0
+    for r in ok:
+        for name, value in r["checks"].items():
+            if name not in check_results:
+                check_results[name] = []
+            check_results[name].append(value)
+        if "judge" in r:
+            for name, score in r["judge"]["scores"].items():
+                if name not in judge_results:
+                    judge_results[name] = []
+                judge_results[name].append(score)
+        if "judge_error" in r:
+            judge_errors += 1
+
     return {
         "samples": len(records),
         "errors": len(records) - len(ok),
-        "judge_errors": sum("judge_error" in r for r in ok),
+        "judge_errors": judge_errors,
         "pass_rate": mean(passed(r) for r in records),
-        # cases can run different checks (a declined case has only "declined")
-        "checks": {name: mean(r["checks"][name] for r in ok if name in r["checks"])
-                   for name in dict.fromkeys(n for r in ok for n in r["checks"])},
-        "judge": {c: mean(s[c] for s in judged) for c in (judged[0] if judged else [])},
+        "checks": {name: mean(values) for name, values in check_results.items()},
+        "judge": {name: mean(scores) for name, scores in judge_results.items()},
     }
 
 
-def print_summary(name: str, summary: dict, records: list[dict]) -> None:
+def print_summary(name, summary, records):
     print(f"\n== {name}: {summary['pass_rate']:.0%} passed "
           f"({summary['samples']} samples, {summary['errors']} errors, {summary['judge_errors']} judge errors)")
     for check, rate in summary["checks"].items():
         print(f"  check {check:<16} {rate:.0%}")
     for criterion, score in summary["judge"].items():
         print(f"  judge {criterion:<16} {score:.2f} / 5")
+
     for r in records:
         if passed(r):
             continue
         if "error" in r:
             why = r["error"]
         else:
-            failed = [c for c, v in r["checks"].items() if not v]
-            low = [f"{c}={s:g}" for c, s in r.get("judge", {}).get("scores", {}).items() if s < MIN_PASSING_SCORE]
-            why = ", ".join(failed + low)
+            reasons = [check for check, ok in r["checks"].items() if not ok]
+            for criterion, score in r.get("judge", {}).get("scores", {}).items():
+                if score < MIN_PASSING_SCORE:
+                    reasons.append(f"{criterion}={score:g}")
+            why = ", ".join(reasons)
         print(f"  FAIL {r['case']}#{r['sample']}: {why[:200]}")
 
 
-def print_retrieval(rows: list[dict]) -> None:
+def print_retrieval(rows):
     print("\n== retrieval")
     print(f"  {'mode':<10} {'chunks':>6} {'k':>2} {'recall':>7} {'context':>8}")
     for r in rows:
@@ -182,63 +224,75 @@ def print_retrieval(rows: list[dict]) -> None:
     print("  (context = share of the document passed to the LLM; first mode is the pipeline's)")
 
 
-def main() -> None:
+def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("suite", choices=["posts", "replies", "retrieval", "all"])
     parser.add_argument("--n", type=int, default=1, help="samples per case (LLM output varies run to run)")
     parser.add_argument("--model", help="generator model (default: OPENROUTER_MODEL)")
     parser.add_argument("--judge-model", help="judge model (default: EVAL_JUDGE_MODEL, else the generator default)")
-    parser.add_argument("--no-judge", action="store_true", help="deterministic checks only")
+    parser.add_argument("--no-judge", action="store_true", help="rule checks only")
     parser.add_argument("--context-file", help="read company context from a text file instead of Notion")
     args = parser.parse_args()
 
-    suites = ["retrieval", "posts", "replies"] if args.suite == "all" else [args.suite]
+    if args.suite == "all":
+        suites = ["retrieval", "posts", "replies"]
+    else:
+        suites = [args.suite]
     uses_llm = suites != ["retrieval"]
 
     judge_model = None
     if uses_llm and not args.no_judge:
         judge_model = args.judge_model or os.environ.get("EVAL_JUDGE_MODEL") or DEFAULT_MODEL
 
+    # the replies suite doesn't need the company page
     document = ""
     if suites != ["replies"]:
         if args.context_file:
             document = Path(args.context_file).read_text(encoding="utf-8")
         else:
-            from notion_fetch import get_context_text
+            from notion_fetch import get_context_text  # imported here so other suites don't need a Notion token
             document = get_context_text()
+
+    page_fingerprint = None
+    if document:
+        # tells results from different versions of the Notion page apart
+        page_fingerprint = hashlib.sha256(document.encode()).hexdigest()[:12]
 
     results = {
         "config": {
             "model": (args.model or DEFAULT_MODEL) if uses_llm else None,
             "judge_model": judge_model,
             "n": args.n,
-            "context_sha": hashlib.sha256(document.encode()).hexdigest()[:12] if document else None,
+            "context_sha": page_fingerprint,
         },
         "suites": {},
     }
-    out = HERE / "results" / f"{datetime.now():%Y%m%d-%H%M%S}-{args.suite}.json"
-    # written in finally so a crash or Ctrl+C keeps the samples already paid for
+    out_path = HERE / "results" / f"{datetime.now():%Y%m%d-%H%M%S}-{args.suite}.json"
+
+    # save in finally, so a crash or Ctrl+C still keeps the samples already run (and paid for)
     try:
         for name in suites:
             if name == "retrieval":
                 rows = run_retrieval(document)
                 print_retrieval(rows)
-                results["suites"][name] = {"rows": rows}
+                results["suites"]["retrieval"] = {"rows": rows}
                 continue
+
             print(f"running {name} ", end="", flush=True)
-            records: list[dict] = []
+            records = []
             results["suites"][name] = {"records": records}
             if name == "posts":
                 run_posts(document, args.n, args.model, judge_model, records)
             else:
                 run_replies(args.n, args.model, judge_model, records)
+
             summary = summarize(records)
             results["suites"][name]["summary"] = summary
             print_summary(name, summary, records)
     finally:
-        out.parent.mkdir(exist_ok=True)
-        out.write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"\nwrote {out.relative_to(HERE.parent)}")
+        out_path.parent.mkdir(exist_ok=True)
+        out_path.write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"\nwrote {out_path.relative_to(HERE.parent)}")
 
 
 if __name__ == "__main__":

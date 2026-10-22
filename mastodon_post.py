@@ -6,69 +6,64 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_URL = os.environ["MASTODON_BASE_URL"].rstrip("/")
-TOKEN = os.environ["MASTODON_ACCESS_TOKEN"]
-MAX_RETRIES = 3  # on 429 rate limiting
+HEADERS = {"Authorization": "Bearer " + os.environ["MASTODON_ACCESS_TOKEN"]}
+MAX_RETRIES = 3  # when Mastodon says 429 (too many requests)
 
-def _retry_after_s(r: requests.Response) -> int:
-    try:
-        return int(r.headers.get("Retry-After", "5"))
-    except ValueError:  # an HTTP date instead of seconds
-        return 5
 
-def post_status(
-    text: str,
-    visibility: str | None = None,
-    in_reply_to_id: str | None = None,
-    media_ids: list[str] | None = None,
-) -> dict:
-    url = f"{BASE_URL}/api/v1/statuses"
-    headers = {"Authorization": f"Bearer {TOKEN}"}
+def wait_seconds(response):
+    # Retry-After is usually a number of seconds, but it can also be a date
+    value = response.headers.get("Retry-After", "5")
+    if value.isdigit():
+        return int(value)
+    return 5
+
+
+def post_status(text, visibility=None, in_reply_to_id=None, media_ids=None):
     data = {"status": text}
     if visibility:
-        data["visibility"] = visibility  # public|unlisted|private|direct; omitted = account default
+        data["visibility"] = visibility  # public, unlisted, private or direct
     if in_reply_to_id:
         data["in_reply_to_id"] = in_reply_to_id
     if media_ids:
         data["media_ids[]"] = media_ids
 
-    # a 429 means nothing was posted, so retrying cannot duplicate the status
-    for attempt in range(MAX_RETRIES + 1):
-        r = requests.post(url, headers=headers, data=data, timeout=30)
-        if r.status_code != 429 or attempt == MAX_RETRIES:
-            break
-        time.sleep(_retry_after_s(r))
+    url = BASE_URL + "/api/v1/statuses"
+    r = requests.post(url, headers=HEADERS, data=data, timeout=30)
+
+    # a 429 means nothing was posted, so waiting and trying again can't post twice
+    retries = 0
+    while r.status_code == 429 and retries < MAX_RETRIES:
+        time.sleep(wait_seconds(r))
+        r = requests.post(url, headers=HEADERS, data=data, timeout=30)
+        retries += 1
 
     r.raise_for_status()
     return r.json()
 
-def upload_media_from_url(image_url: str, alt_text: str = "") -> str:
-    img_bytes = requests.get(image_url, timeout=60).content
 
-    # Upload to Mastodon (v2 recommended; v1 works but is deprecated)
-    files = {"file": ("image.png", img_bytes)}
+def upload_media_from_url(image_url, alt_text=""):
+    image = requests.get(image_url, timeout=60)
+    image.raise_for_status()
+
     data = {}
     if alt_text:
-        data["description"] = alt_text  # supported on v1; many instances also accept on v2
-
+        data["description"] = alt_text
     r = requests.post(
-        f"{BASE_URL}/api/v2/media",
-        headers={"Authorization": f"Bearer {TOKEN}"},
-        files=files,
+        BASE_URL + "/api/v2/media",
+        headers=HEADERS,
+        files={"file": ("image.png", image.content)},
         data=data,
         timeout=60,
     )
     r.raise_for_status()
-    media = r.json()
-    return media["id"]
+    return r.json()["id"]
 
-def post_batch(posts: list[dict], visibility: str = "unlisted", dry_run: bool = True):
-    """
-    posts: list of dicts with keys like {text, hashtags?, requires_review?}
-    dry_run=True prints instead of posting.
-    """
+
+def post_batch(posts, visibility="unlisted", dry_run=True):
+    """posts: list of dicts like {"text": ..., "hashtags": [...], "requires_review": False}"""
     for i, p in enumerate(posts, start=1):
         if p.get("requires_review"):
-            print(f"[SKIP review] #{i}: {p.get('text','')[:80]}…")
+            print(f"[SKIP review] #{i}: {p.get('text', '')[:80]}…")
             continue
 
         text = (p.get("text") or "").strip()
@@ -80,19 +75,15 @@ def post_batch(posts: list[dict], visibility: str = "unlisted", dry_run: bool = 
             print(f"[DRY RUN] #{i}:\n{text}\n---\n")
             continue
 
-        resp = post_status(text, visibility=visibility)
-        print("Posted:", resp.get("url") or resp.get("id"))
+        response = post_status(text, visibility=visibility)
+        print("Posted:", response.get("url") or response.get("id"))
         time.sleep(1)
 
-if __name__ == "__main__":
-    payload = {
-        "posts": [
-            {
-                "text": "AI answer visibility ≠ classic SEO. Start by measuring mentions + citations across a consistent prompt set.",
-                "hashtags": ["#MarketingIntelligence", "#LLM"],
-                "requires_review": False
-            }
-        ]
-    }
 
-    post_batch(payload["posts"], visibility="unlisted", dry_run=True)  # set dry_run=False to actually post
+if __name__ == "__main__":
+    example = [{
+        "text": "AI answer visibility ≠ classic SEO. Start by measuring mentions + citations across a consistent prompt set.",
+        "hashtags": ["#MarketingIntelligence", "#LLM"],
+        "requires_review": False,
+    }]
+    post_batch(example, visibility="unlisted", dry_run=True)  # dry_run=False to really post

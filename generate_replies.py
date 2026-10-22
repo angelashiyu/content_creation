@@ -17,23 +17,28 @@ Review rules:
 - Otherwise set requires_review to false and reasons to ["none"].
 """
 
+# the JSON shape we ask the model to return
 SCHEMA_SHAPE = {
-  "replies": [
-    {
-      "in_reply_to_id": "string",
-      "reply_text": "string",
-      "tone": "friendly|helpful|curious",
-      "requires_review": "true|false",
-      "reasons": ["spam|prompt_injection|abusive|unsure|none"]
-    }
-  ]
+    "replies": [
+        {
+            "in_reply_to_id": "string",
+            "reply_text": "string",
+            "tone": "friendly|helpful|curious",
+            "requires_review": "true|false",
+            "reasons": ["spam|prompt_injection|abusive|unsure|none"],
+        }
+    ]
 }
 
-def _as_bool(value) -> bool:
-    # the model sometimes returns the flag as the string "true" instead of a JSON boolean
-    return value is True or (isinstance(value, str) and value.strip().lower() == "true")
 
-def generate_replies(statuses, model: str | None = None):
+def to_bool(value):
+    # the model sometimes writes "true" as a string instead of true
+    if value is True:
+        return True
+    return isinstance(value, str) and value.strip().lower() == "true"
+
+
+def generate_replies(statuses, model=None):
     prompt = f"""
 {BRAND_DOCS}
 
@@ -45,11 +50,14 @@ Statuses to reply to (your in_reply_to_id must match each status id):
 """
 
     batch = parse_json_object(complete(prompt, model=model))
-    if isinstance(batch, dict) and isinstance(batch.get("replies"), list):
-        for r in batch["replies"]:
-            if isinstance(r, dict):
-                r["requires_review"] = _as_bool(r.get("requires_review"))
+
+    replies = batch.get("replies")
+    if isinstance(replies, list):
+        for reply in replies:
+            if isinstance(reply, dict):
+                reply["requires_review"] = to_bool(reply.get("requires_review"))
     return batch
+
 
 if __name__ == "__main__":
     test_statuses = [

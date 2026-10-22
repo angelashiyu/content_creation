@@ -1,66 +1,69 @@
-import os, json, requests
+import json
+import os
+import requests
 from dotenv import load_dotenv
-from pathlib import Path
 
-load_dotenv(dotenv_path=Path(__file__).with_name(".env"))
-
-NOTION_TOKEN = os.environ["NOTION_TOKEN"]
-NOTION_VERSION = "2022-06-28"
+load_dotenv()
 
 HEADERS = {
-    "Authorization": f"Bearer {NOTION_TOKEN}",
-    "Notion-Version": NOTION_VERSION,
-    "Content-Type": "application/json",
+    "Authorization": "Bearer " + os.environ["NOTION_TOKEN"],
+    "Notion-Version": "2022-06-28",
 }
 
-def _rich_text_to_plain(rich_text: list[dict]) -> str:
-    return "".join(rt.get("plain_text", "") for rt in (rich_text or [])).strip()
+# Notion block types that hold normal text
+TEXT_BLOCKS = [
+    "paragraph", "heading_1", "heading_2", "heading_3",
+    "bulleted_list_item", "numbered_list_item", "to_do", "quote", "callout",
+]
 
-def _block_text(block: dict) -> str:
-    t = block.get("type")
-    obj = block.get(t, {}) if t else {}
 
-    if t in {
-        "paragraph", "heading_1", "heading_2", "heading_3",
-        "bulleted_list_item", "numbered_list_item", "to_do",
-        "quote", "callout"
-    }:
-        return _rich_text_to_plain(obj.get("rich_text", []))
+def rich_text_to_plain(rich_text):
+    parts = []
+    for piece in rich_text or []:
+        parts.append(piece.get("plain_text", ""))
+    return "".join(parts).strip()
 
-    if t == "code":
-        code = _rich_text_to_plain(obj.get("rich_text", []))
-        lang = obj.get("language", "")
-        return f"```{lang}\n{code}\n```".strip()
 
+def block_text(block):
+    block_type = block.get("type")
+    content = block.get(block_type, {})
+
+    if block_type in TEXT_BLOCKS:
+        return rich_text_to_plain(content.get("rich_text"))
+    if block_type == "code":
+        code = rich_text_to_plain(content.get("rich_text"))
+        language = content.get("language", "")
+        return "```" + language + "\n" + code + "\n```"
     return ""
 
-def _get_block_children(block_id: str) -> list[dict]:
-    results = []
-    url = f"https://api.notion.com/v1/blocks/{block_id}/children?page_size=100"
+
+def get_block_children(block_id):
+    # Notion sends at most 100 blocks per request, so keep asking until has_more is false
+    url = f"https://api.notion.com/v1/blocks/{block_id}/children"
+    params = {"page_size": 100}
+    blocks = []
     while True:
-        r = requests.get(url, headers=HEADERS, timeout=30)
+        r = requests.get(url, headers=HEADERS, params=params, timeout=30)
         r.raise_for_status()
         data = r.json()
-        results.extend(data.get("results", []))
-        if not data.get("has_more"):
-            break
-        url = f"https://api.notion.com/v1/blocks/{block_id}/children?page_size=100&start_cursor={data['next_cursor']}"
-    return results
+        blocks.extend(data["results"])
+        if not data["has_more"]:
+            return blocks
+        params["start_cursor"] = data["next_cursor"]
 
-def fetch_page_text(page_id: str) -> str:
-    blocks = _get_block_children(page_id)
+
+def fetch_page_text(page_id):
     lines = []
-    for b in blocks:
-        txt = _block_text(b)
-        if txt:
-            lines.append(txt)
-    # blank line between blocks so chunk_by_paragraphs can find the boundaries
+    for block in get_block_children(page_id):
+        text = block_text(block)
+        if text:
+            lines.append(text)
+    # blank line between blocks so the paragraph chunker can split them
     return "\n\n".join(lines).strip()
 
-def get_context_text(config_path: str = "config.json") -> str:
-    with open(config_path, "r", encoding="utf-8") as f:
-        cfg = json.load(f)
 
-    page_id = cfg["notion"]["overview_page_id"]
-    page_id = page_id.replace("-", "")
+def get_context_text(config_path="config.json"):
+    with open(config_path, encoding="utf-8") as f:
+        config = json.load(f)
+    page_id = config["notion"]["overview_page_id"].replace("-", "")
     return fetch_page_text(page_id)
